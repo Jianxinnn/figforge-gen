@@ -104,7 +104,11 @@ def read_env_token(env_name: str | None, source: str):
         return None, None
     token = os.environ.get(env_name)
     if not token:
-        raise RuntimeError(f"{source} 指定了 {env_name}，但环境变量未设置")
+        raise RuntimeError(
+            f"{source} 指定了 {env_name}，但环境变量未设置；"
+            "如果 key 写在 ~/.zshrc 中，请先 source 用户 shell 配置后再运行；"
+            "不要用其他配置源的 token 临时注入该变量"
+        )
     return token, f"{source}:{env_name}"
 
 

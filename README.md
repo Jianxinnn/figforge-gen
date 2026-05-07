@@ -99,6 +99,14 @@ model = "gpt-image-2"
 python3.12 scripts/gen_images.py --show-config
 ```
 
+如果 key 写在 `~/.zshrc` 里，运行前需要在同一个 shell 中 source 用户环境：
+
+```bash
+zsh -lc 'source ~/.zshrc >/dev/null 2>&1 || true; python3.12 scripts/gen_images.py --show-config'
+```
+
+不要把不同配置源混在一起使用。尤其不要把 Codex `~/.codex/auth.json` 里的 token 手动注入到 `GEN_IMAGES_API_KEY`，再去调用 `gen-images` 独立配置里的 `base_url`。脚本会按优先级原子解析 `base_url` 和 key；如果独立配置指定了 `api_key_env`，就应该让对应环境变量生效。
+
 ### 4. Codex / Claude Code 回退配置
 
 如果没有检测到 `gen-images` 独立 API 配置，脚本会从 Codex 配置读取当前 provider：

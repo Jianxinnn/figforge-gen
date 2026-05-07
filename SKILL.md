@@ -173,7 +173,36 @@ allowed-tools: [Bash, Read]
 
 缺少必填字段时，不要调用脚本。
 
-### 3. 调用脚本
+### 3. API 配置预检
+
+每次当前对话首次调用 `scripts/gen_images.py` 生成图片前，必须先做配置预检：
+
+- 在同一个 shell 语义下 source 用户环境，例如 `source ~/.zshrc >/dev/null 2>&1 || true`
+- 调用 `scripts/gen_images.py --show-config`
+- 只检查 JSON 中的 `ok`、`source`、`base_url`、`model`、`token_present`
+- 不要打印、读取、复制或拼接完整 token
+- 如果 `token_present=false` 或脚本报 `api_key_env ... 环境变量未设置`，先尝试 source 用户 shell 配置；仍失败时让用户设置对应环境变量
+
+配置源必须原子一致：
+- 不要从 `~/.codex/auth.json` 取 token 去填 `GEN_IMAGES_API_KEY`
+- 不要把 Codex token 与 `gen-images` 独立配置里的 `base_url` 混用
+- 不要把独立配置的 token 与 Codex / Claude 的 `base_url` 混用
+- 不要为了绕过配置错误临时 export 其他来源的 key，除非用户明确要求临时覆盖
+- 如果用户已经配置了 `~/.config/gen-images/config.toml` 和 `api_key_env`，正确做法是 source 用户 shell 后让脚本自己解析，而不是手动注入 key
+
+推荐预检命令形态：
+
+```bash
+zsh -lc 'source ~/.zshrc >/dev/null 2>&1 || true; <python_cmd> "<skill-dir>/scripts/gen_images.py" --show-config'
+```
+
+预检通过后，实际生成命令也要用同样的 shell 环境：
+
+```bash
+zsh -lc 'source ~/.zshrc >/dev/null 2>&1 || true; <python_cmd> "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..."'
+```
+
+### 4. 调用脚本
 
 使用 Bash 调用 Python 脚本。脚本路径应通过 skill 所在目录推导，不要写死绝对路径。
 
@@ -233,13 +262,13 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..."
 $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..."
 ```
 
-### 3.1 timeout 计算规则
+### 4.1 timeout 计算规则
 
 `timeout` 规则以 `references/fields.md` 为准。
 
 在发起 Bash 工具调用前，先按 `references/fields.md` 中的 `timeout 规则` 计算本次调用的 `timeout`，不要把 timeout 判断交给脚本。
 
-### 3.2 Bash 调用模板
+### 4.2 Bash 调用模板
 
 文生图：
 - 先按上面的规则算出 `timeout`

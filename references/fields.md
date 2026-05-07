@@ -57,6 +57,13 @@ API 连接配置只包含：
 4. Codex 配置：`~/.codex/config.toml`、`~/.codex/auth.json`
 5. Claude Code 配置：`~/.claude/settings.json`
 
+运行前配置规则：
+- 实际生成前先在同一 shell 环境中 source 用户环境并运行 `--show-config`
+- 如果独立配置指定 `api_key_env`，只允许从该环境变量取 key
+- 不要把 Codex / Claude 的 token 注入到 `GEN_IMAGES_API_KEY`
+- 不要混用不同配置来源的 `base_url` 和 token
+- `source`、`base_url`、`model`、`token_present` 可以展示；完整 token 永远不要展示
+
 不要把 `size`、`quality`、`output_format` 写入 API 配置文件。这些生成参数由用户自然语言、当前 LLM 的保守推断和命令行参数控制。
 
 ## 自然语言映射
