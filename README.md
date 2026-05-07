@@ -11,6 +11,7 @@
 本仓库在原始思路基础上做了以下调整，目标是让它更适合在 Codex、Claude Code 以及其他可执行 Bash 的 Agent 环境中复用：
 
 - 支持 Codex 配置读取，按 `~/.codex/config.toml` 中当前 `model_provider` 读取对应 `base_url`，不再假设 provider 名称必须是 `OpenAI`
+- 支持 `gen-images` 独立 API 配置，优先级高于 Codex / Claude Code 全局配置
 - 保留 Claude Code 配置回退，Codex 配置不可用时再读取 `~/.claude/settings.json`
 - 将 Python 启动方式改为探测式选择，优先使用本机可用的 Python 3.11+，`uv` 仅作为兜底选项
 - 增加 LLM 参数整理规则，可根据用户 prompt 保守推断 `size`、`quality`、`background`、`output_format`、`n`、`input_fidelity`
@@ -26,7 +27,7 @@
 - 默认优先走流式 Responses API，必要时回退旧的非流式 Images API
 - 支持自动触发
 - 支持手动使用 `/gen-images ...`
-- 自动读取 Codex 当前 `model_provider` 配置中的 API Base URL 和 Token；必要时可回退 Claude Code 配置
+- 优先读取 `gen-images` 独立 API 配置；没有独立配置时回退 Codex / Claude Code 配置
 - 自动将生成结果保存到当前工作目录下的 `./gen-images/`
 
 ## 使用前提
@@ -47,9 +48,60 @@
 python3 --version
 ```
 
-### 3. Codex / Claude Code 配置
+### 3. API 配置
 
-本 skill 优先从 Codex 配置读取当前 provider：
+本 skill 的 API 配置优先级如下：
+
+1. 命令行显式参数：`--api-base`、`--api-key`、`--api-key-env`、`--model`
+2. 独立环境变量：`GEN_IMAGES_API_BASE`、`GEN_IMAGES_API_KEY`、`GEN_IMAGES_MODEL`
+3. `gen-images` 独立配置文件
+4. Codex 全局配置
+5. Claude Code 全局配置
+
+独立配置文件自动检测顺序：
+
+```text
+$GEN_IMAGES_CONFIG
+$XDG_CONFIG_HOME/gen-images/config.toml
+~/.config/gen-images/config.toml
+~/.gen-images/config.toml
+```
+
+推荐配置：
+
+```toml
+[api]
+base_url = "https://your-api-base/v1"
+api_key_env = "GEN_IMAGES_API_KEY"
+model = "gpt-image-2"
+```
+
+然后在 shell 中设置：
+
+```bash
+export GEN_IMAGES_API_KEY="sk-..."
+```
+
+也支持直接写 key，但不推荐长期使用：
+
+```toml
+[api]
+base_url = "https://your-api-base/v1"
+api_key = "sk-..."
+model = "gpt-image-2"
+```
+
+`base_url` 应填写版本化 API base，例如 `https://your-api-base/v1`。脚本会自动拼接 `/responses`、`/images/generations` 和 `/images/edits`。
+
+可以用下面的命令查看当前实际使用的配置来源。输出不会展示完整 token：
+
+```bash
+python3.12 scripts/gen_images.py --show-config
+```
+
+### 4. Codex / Claude Code 回退配置
+
+如果没有检测到 `gen-images` 独立 API 配置，脚本会从 Codex 配置读取当前 provider：
 
 ```text
 ~/.codex/config.toml
@@ -73,7 +125,7 @@ python3 --version
 - `env.ANTHROPIC_BASE_URL`
 - `env.ANTHROPIC_AUTH_TOKEN`
 
-### 4. 后端接口支持
+### 5. 后端接口支持
 
 反代链路需要支持：
 
@@ -83,6 +135,8 @@ python3 --version
 - Claude Code 模式：`POST <base_url>/v1/images/generations`、`POST <base_url>/v1/images/edits`
 
 默认会先尝试 Responses API SSE 流式调用。如果该端点不支持、返回兼容性错误，或改图请求使用 `mask`，脚本会回退到原来的非流式 Images API。
+
+`size`、`quality`、`output_format` 等生成参数不放入 API 配置文件。它们由用户自然语言、skill 的 LLM 参数整理规则和命令行参数控制。
 
 ## 目录结构
 
@@ -145,6 +199,8 @@ Codex 或其他 Agent 的安装目录以各自的 skill/插件加载规则为准
 python3.12 scripts/gen_images.py \
   --mode generate \
   --model pro/gpt-image-2 \
+  --api-base https://your-api-base/v1 \
+  --api-key-env GEN_IMAGES_API_KEY \
   --prompt "一张透明背景的猫咪头像" \
   --size 1024x1024 \
   --output-format png

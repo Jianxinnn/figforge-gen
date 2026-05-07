@@ -3,6 +3,7 @@ import argparse
 import base64
 import json
 import mimetypes
+import os
 import re
 import sys
 import tomllib
@@ -14,6 +15,14 @@ from pathlib import Path
 
 
 DEFAULT_MODEL = "gpt-image-2"
+
+
+class RuntimeSettings:
+    def __init__(self, source: str, base_url: str, token: str, model: str):
+        self.source = source
+        self.base_url = base_url.rstrip("/")
+        self.token = token
+        self.model = model or DEFAULT_MODEL
 
 
 class ApiHTTPError(RuntimeError):
@@ -47,7 +56,126 @@ def load_toml(path: Path, label: str):
         raise RuntimeError(f"读取{label}失败: {exc}") from exc
 
 
-def load_claude_settings():
+def flatten_api_config(data: dict):
+    api = data.get("api") if isinstance(data.get("api"), dict) else {}
+    merged = dict(data)
+    merged.update(api)
+    return merged
+
+
+def get_config_paths(args):
+    if args.config:
+        return [(Path(args.config).expanduser(), True, "--config")]
+
+    env_path = os.environ.get("GEN_IMAGES_CONFIG")
+    if env_path:
+        return [(Path(env_path).expanduser(), True, "GEN_IMAGES_CONFIG")]
+
+    paths = []
+    xdg_config_home = os.environ.get("XDG_CONFIG_HOME")
+    if xdg_config_home:
+        paths.append((Path(xdg_config_home).expanduser() / "gen-images" / "config.toml", False, "XDG_CONFIG_HOME"))
+    paths.extend([
+        (Path.home() / ".config" / "gen-images" / "config.toml", False, "user config"),
+        (Path.home() / ".gen-images" / "config.toml", False, "legacy user config"),
+    ])
+    return paths
+
+
+def load_gen_images_config(args):
+    for path, required, source in get_config_paths(args):
+        if path.exists():
+            return flatten_api_config(load_toml(path, f"gen-images config ({source})")), path
+        if required:
+            raise RuntimeError(f"未找到 gen-images 配置文件: {path}")
+    return {}, None
+
+
+def get_config_value(config: dict, *names):
+    for name in names:
+        value = config.get(name)
+        if value is not None and str(value).strip():
+            return str(value).strip()
+    return None
+
+
+def read_env_token(env_name: str | None, source: str):
+    if not env_name:
+        return None, None
+    token = os.environ.get(env_name)
+    if not token:
+        raise RuntimeError(f"{source} 指定了 {env_name}，但环境变量未设置")
+    return token, f"{source}:{env_name}"
+
+
+def resolve_model(args, config: dict):
+    return (
+        args.model
+        or os.environ.get("GEN_IMAGES_MODEL")
+        or get_config_value(config, "model")
+        or DEFAULT_MODEL
+    )
+
+
+def load_direct_settings(args, config: dict, config_path: Path | None, model: str):
+    base_url = (
+        args.api_base
+        or os.environ.get("GEN_IMAGES_API_BASE")
+        or get_config_value(config, "base_url", "api_base")
+    )
+
+    token = None
+    token_source = None
+
+    if args.api_key:
+        token = args.api_key
+        token_source = "--api-key"
+    elif args.api_key_env:
+        token, token_source = read_env_token(args.api_key_env, "--api-key-env")
+    elif os.environ.get("GEN_IMAGES_API_KEY"):
+        token = os.environ["GEN_IMAGES_API_KEY"]
+        token_source = "GEN_IMAGES_API_KEY"
+    else:
+        config_key_env = get_config_value(config, "api_key_env", "token_env")
+        if config_key_env:
+            token, token_source = read_env_token(config_key_env, "gen-images config api_key_env")
+        else:
+            token = get_config_value(config, "api_key", "token")
+            if token:
+                token_source = "gen-images config api_key"
+
+    has_direct_config = any([
+        args.api_base,
+        args.api_key,
+        args.api_key_env,
+        os.environ.get("GEN_IMAGES_API_BASE"),
+        os.environ.get("GEN_IMAGES_API_KEY"),
+        get_config_value(config, "base_url", "api_base", "api_key", "token", "api_key_env", "token_env"),
+    ])
+
+    if not has_direct_config:
+        return None
+
+    if not base_url:
+        raise RuntimeError("已检测到 gen-images 独立 API 配置，但缺少 base_url")
+    if not token:
+        hint = "请设置 api_key、api_key_env，或环境变量 GEN_IMAGES_API_KEY"
+        if config_path:
+            hint = f"{hint}；当前配置文件: {config_path}"
+        raise RuntimeError(f"已检测到 gen-images 独立 API 配置，但缺少 API key。{hint}")
+
+    source_parts = ["gen-images"]
+    if config_path:
+        source_parts.append(str(config_path))
+    if args.api_base or args.api_key or args.api_key_env:
+        source_parts.append("cli")
+    if os.environ.get("GEN_IMAGES_API_BASE") or os.environ.get("GEN_IMAGES_API_KEY"):
+        source_parts.append("env")
+    source_parts.append(token_source or "token")
+    return RuntimeSettings("+".join(source_parts), str(base_url), token, model)
+
+
+def load_claude_settings(model: str):
     settings_path = Path.home() / ".claude" / "settings.json"
     data = load_json(settings_path, "Claude settings.json")
 
@@ -60,10 +188,13 @@ def load_claude_settings():
     if not token:
         raise RuntimeError("settings.json 中缺少 env.ANTHROPIC_AUTH_TOKEN")
 
-    return base_url.rstrip("/"), token
+    base_url = str(base_url).rstrip("/")
+    if not base_url.endswith("/v1"):
+        base_url = f"{base_url}/v1"
+    return RuntimeSettings("claude", base_url, token, model)
 
 
-def load_codex_settings():
+def load_codex_settings(model: str):
     config_path = Path.home() / ".codex" / "config.toml"
     auth_path = Path.home() / ".codex" / "auth.json"
 
@@ -84,7 +215,7 @@ def load_codex_settings():
     if not token:
         raise RuntimeError("auth.json 中缺少 OPENAI_API_KEY")
 
-    return str(base_url).rstrip("/"), str(token)
+    return RuntimeSettings(f"codex:{provider_name}", str(base_url), str(token), model)
 
 
 def detect_caller_from_script_dir():
@@ -102,36 +233,36 @@ def detect_caller_from_script_dir():
     return None
 
 
-def load_runtime_settings():
+def load_runtime_settings(args):
+    config, config_path = load_gen_images_config(args)
+    model = resolve_model(args, config)
+
+    direct_settings = load_direct_settings(args, config, config_path, model)
+    if direct_settings:
+        return direct_settings
+
     caller = detect_caller_from_script_dir()
     if caller == "claude":
-        base_url, token = load_claude_settings()
-        return caller, base_url, token
+        return load_claude_settings(model)
     if caller == "codex":
-        base_url, token = load_codex_settings()
-        return caller, base_url, token
+        return load_codex_settings(model)
 
     errors = []
     for name, loader in (("codex", load_codex_settings), ("claude", load_claude_settings)):
         try:
-            base_url, token = loader()
-            return name, base_url, token
+            return loader(model)
         except RuntimeError as exc:
             errors.append(f"{name}: {exc}")
 
     raise RuntimeError("; ".join(errors))
 
 
-def build_api_url(caller: str, base_url: str, mode: str):
+def build_api_url(base_url: str, mode: str):
     endpoint = "/images/generations" if mode == "generate" else "/images/edits"
-    if caller == "claude":
-        return f"{base_url}/v1{endpoint}"
     return f"{base_url}{endpoint}"
 
 
-def build_responses_url(caller: str, base_url: str):
-    if caller == "claude":
-        return f"{base_url}/v1/responses"
+def build_responses_url(base_url: str):
     return f"{base_url}/responses"
 
 
@@ -443,9 +574,14 @@ def build_responses_payload(args, default_partial_images: bool = True):
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mode", choices=["generate", "edit"], required=True)
+    parser.add_argument("--mode", choices=["generate", "edit"])
     parser.add_argument("--prompt")
     parser.add_argument("--model")
+    parser.add_argument("--config")
+    parser.add_argument("--api-base", dest="api_base")
+    parser.add_argument("--api-key", dest="api_key")
+    parser.add_argument("--api-key-env", dest="api_key_env")
+    parser.add_argument("--show-config", action="store_true")
     parser.add_argument("--image")
     parser.add_argument("--mask")
     parser.add_argument("--size")
@@ -461,29 +597,47 @@ def parse_args():
     return parser.parse_args()
 
 
+def print_runtime_settings(settings: RuntimeSettings):
+    print(json.dumps({
+        "ok": True,
+        "source": settings.source,
+        "base_url": settings.base_url,
+        "model": settings.model,
+        "token_present": bool(settings.token),
+    }, ensure_ascii=False))
+
+
 def main():
     args = parse_args()
     try:
-        caller, base_url, token = load_runtime_settings()
+        settings = load_runtime_settings(args)
     except RuntimeError as exc:
         fail(str(exc))
 
+    if args.show_config:
+        print_runtime_settings(settings)
+        return
+
+    if not args.mode:
+        fail("缺少 mode")
+
+    args.model = settings.model
     stream_used = False
     response = None
 
     if args.stream and not (args.mode == "edit" and args.mask):
         try:
-            url = build_responses_url(caller, base_url)
+            url = build_responses_url(settings.base_url)
             image_entries = []
             for _ in range(args.n or 1):
                 try:
                     payload = build_responses_payload(args)
-                    b64_json = post_responses_stream(url, token, payload)
+                    b64_json = post_responses_stream(url, settings.token, payload)
                 except ApiHTTPError as exc:
                     if args.partial_images is not None or exc.code not in (400, 422):
                         raise
                     payload = build_responses_payload(args, default_partial_images=False)
-                    b64_json = post_responses_stream(url, token, payload)
+                    b64_json = post_responses_stream(url, settings.token, payload)
                 image_entries.append({"b64_json": b64_json})
             response = {"data": image_entries}
             stream_used = True
@@ -499,15 +653,15 @@ def main():
         else:
             payload = build_edit_payload(args)
 
-        url = build_api_url(caller, base_url, args.mode)
-        response = post_json(url, token, payload)
+        url = build_api_url(settings.base_url, args.mode)
+        response = post_json(url, settings.token, payload)
 
     data = response.get("data")
     if not isinstance(data, list) or not data:
         fail("接口返回中缺少 data")
 
     used_params = {
-        "model": args.model or DEFAULT_MODEL,
+        "model": settings.model,
         "size": args.size,
         "quality": args.quality,
         "background": args.background,

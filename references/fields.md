@@ -42,6 +42,23 @@
 - `moderation`
 - `input_fidelity`（改图可用）
 
+## API 配置字段
+
+API 连接配置只包含：
+- `base_url` / `api_base`
+- `api_key` / `token`
+- `api_key_env` / `token_env`
+- `model`
+
+配置来源优先级：
+1. 命令行：`--api-base`、`--api-key`、`--api-key-env`、`--model`
+2. 环境变量：`GEN_IMAGES_API_BASE`、`GEN_IMAGES_API_KEY`、`GEN_IMAGES_MODEL`
+3. 独立配置文件：`$GEN_IMAGES_CONFIG`、`$XDG_CONFIG_HOME/gen-images/config.toml`、`~/.config/gen-images/config.toml`、`~/.gen-images/config.toml`
+4. Codex 配置：`~/.codex/config.toml`、`~/.codex/auth.json`
+5. Claude Code 配置：`~/.claude/settings.json`
+
+不要把 `size`、`quality`、`output_format` 写入 API 配置文件。这些生成参数由用户自然语言、当前 LLM 的保守推断和命令行参数控制。
+
 ## 自然语言映射
 
 ### size

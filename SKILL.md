@@ -156,6 +156,7 @@ allowed-tools: [Bash, Read]
 - `output_compression` 只在用户明确要求压缩、小体积、控制文件大小，且输出格式为 `jpg/jpeg/webp` 时传。
 - `output_format` 优先按用户明确要求；若推断 `background=transparent` 且用户未指定格式，使用 `png`。
 - 推断出的字段只作为接口参数传递，不要从原始 prompt 中删除对应语义；prompt 应尽量保留用户完整意图。
+- API 连接配置只负责 `base_url`、API key 和默认 `model`；不要把 `size`、`quality`、`output_format` 这些生成参数写进配置文件，它们继续由用户自然语言和当前 LLM 参数整理控制。
 
 ## 执行步骤
 
@@ -279,12 +280,20 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --ima
 - `--output-compression`
 - `--partial-images`
 - `--no-stream`（仅在用户明确要求非流式或 Responses 端点不可用排查时使用）
+- `--config`
+- `--api-base`
+- `--api-key`
+- `--api-key-env`
+- `--show-config`
 - `--input-fidelity`
 - `--mask`
 
 ## 脚本行为
 
 `scripts/gen_images.py` 会：
+- 优先读取命令行 API 参数：`--api-base`、`--api-key`、`--api-key-env`、`--model`
+- 其次读取独立环境变量：`GEN_IMAGES_API_BASE`、`GEN_IMAGES_API_KEY`、`GEN_IMAGES_MODEL`
+- 其次读取 `gen-images` 独立配置文件：`$GEN_IMAGES_CONFIG`、`$XDG_CONFIG_HOME/gen-images/config.toml`、`~/.config/gen-images/config.toml`、`~/.gen-images/config.toml`
 - 先基于 `scripts/gen_images.py` 自身所在目录向上逐级检查祖先目录名是否为 `.codex` 或 `.claude`，据此判断当前调用者
 - 找到 `.codex/` 时按 Codex 调用处理，读取 `~/.codex/config.toml` 中的 `model_provider`，再读取 `model_providers.<当前 model_provider>.base_url`
 - 找到 `.claude/` 时按 Claude 调用处理，读取 `~/.claude/settings.json` 中的 `env.ANTHROPIC_BASE_URL` 与 `env.ANTHROPIC_AUTH_TOKEN`
