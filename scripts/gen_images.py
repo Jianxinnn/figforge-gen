@@ -322,8 +322,16 @@ def choose_extension(output_format: str | None, mime: str | None = None):
     return "png"
 
 
-def save_images(image_entries, output_format: str | None):
-    output_dir = Path.cwd() / "gen-images"
+def resolve_output_dir(out_dir: str | None):
+    if out_dir:
+        output_dir = Path(out_dir).expanduser()
+        if not output_dir.is_absolute():
+            output_dir = Path.cwd() / output_dir
+        return output_dir
+    return Path.cwd() / "gen-images"
+
+
+def save_images(image_entries, output_format: str | None, output_dir: Path):
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     paths = []
@@ -537,6 +545,7 @@ def parse_args():
     parser.add_argument("--background")
     parser.add_argument("--output-format", dest="output_format")
     parser.add_argument("--output-compression", dest="output_compression", type=int)
+    parser.add_argument("--out-dir", "--output-dir", dest="out_dir")
     parser.add_argument("--partial-images", dest="partial_images", type=int)
     parser.add_argument("--n", type=int)
     parser.add_argument("--moderation")
@@ -605,6 +614,7 @@ def main():
     if not isinstance(data, list) or not data:
         fail("接口返回中缺少 data")
 
+    output_dir = resolve_output_dir(args.out_dir)
     used_params = {
         "model": settings.model,
         "size": args.size,
@@ -613,11 +623,12 @@ def main():
         "output_format": args.output_format or "png",
         "n": args.n or 1,
         "stream": stream_used,
+        "out_dir": str(output_dir),
     }
     if args.mode == "edit" and args.input_fidelity is not None:
         used_params["input_fidelity"] = args.input_fidelity
 
-    paths = save_images(data, args.output_format)
+    paths = save_images(data, args.output_format, output_dir)
     print(json.dumps({"ok": True, "paths": paths, "used_params": used_params}, ensure_ascii=False))
 
 

@@ -18,6 +18,7 @@
 - 将 Python 启动方式改为探测式选择，优先使用本机可用的 Python 3.11+，`uv` 仅作为兜底选项
 - 增加 LLM 参数整理规则，可根据用户 prompt 保守推断 `size`、`quality`、`background`、`output_format`、`n`、`input_fidelity`
 - 增加 `--model` 支持说明，允许在后端开放时指定如 `pro/gpt-image-2` 等模型
+- 增加 `--out-dir` / `--output-dir`，让 Agent 显式把图片保存到用户当前项目目录
 - 默认优先使用 Responses API SSE 流式生成，降低长耗时图片请求被代理读超时中断的概率
 - 为 HTTP 请求补充 `Accept` 与 `User-Agent` 请求头，避免部分反代链路拒绝 Python 默认请求
 - 修正文档中的目录名、配置读取顺序和直接脚本调用示例
@@ -30,7 +31,7 @@
 - 支持自动触发
 - 支持手动使用 `/gen-images ...`
 - 优先读取 `gen-images` 独立 API 配置；没有独立配置时回退 Codex / Claude Code 配置
-- 自动将生成结果保存到当前工作目录下的 `./gen-images/`
+- 自动将生成结果保存到当前工作目录下的 `./gen-images/`，也支持用 `--out-dir` 指定项目内输出目录
 
 ## 使用前提
 
@@ -213,6 +214,7 @@ python3.12 scripts/gen_images.py \
   --api-key-env GEN_IMAGES_API_KEY \
   --prompt "一张透明背景的猫咪头像" \
   --size 1024x1024 \
+  --out-dir "./gen-images" \
   --output-format png
 ```
 
@@ -224,6 +226,7 @@ python3.12 scripts/gen_images.py \
   --no-stream \
   --prompt "一张透明背景的猫咪头像" \
   --size 1024x1024 \
+  --out-dir "./gen-images" \
   --output-format png
 ```
 
@@ -311,17 +314,25 @@ Bash 调用 `scripts/gen_images.py` 时，timeout 按图片尺寸自动设置。
 
 ## 输出行为
 
-默认输出目录：
+默认输出目录是调用脚本时的当前工作目录下：
 
 ```text
 ./gen-images/
 ```
 
+也可以显式指定：
+
+```bash
+python3.12 scripts/gen_images.py --mode generate --prompt "..." --out-dir "/path/to/project/gen-images"
+```
+
+在 Codex / Claude Code 里，推荐把 `--out-dir` 设为用户当前打开项目目录下的 `gen-images/`，不要把 skill 安装目录、`$CODEX_HOME` 或 `~/.codex/generated_images/` 当成项目输出目录。
+
 成功时返回类似：
 
 ```text
 图片已生成, 图片路径: C:\Users\xxx\gen-images\20260424-003204-01.png
-实际使用的关键参数: model=gpt-image-2, size=2160x3840, quality=high, output_format=png, n=1, stream=true
+实际使用的关键参数: model=gpt-image-2, size=2160x3840, quality=high, output_format=png, n=1, stream=true, out_dir=C:\Users\xxx\gen-images
 ```
 
 失败时返回类似：

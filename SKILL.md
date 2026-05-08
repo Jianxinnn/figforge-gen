@@ -15,6 +15,7 @@ allowed-tools: [Bash, Read]
 - 从用户自然语言中提取可用字段
 - 缺少关键字段时先追问用户，不要盲目执行
 - 字段足够时调用 `scripts/gen_images.py`
+- 默认把结果保存到用户当前项目目录下的 `gen-images/`
 - 完成后向用户输出图片路径和实际使用的关键参数
 
 ## 资源
@@ -167,11 +168,28 @@ allowed-tools: [Bash, Read]
 - `prompt`
 - `image`（改图时）
 - `mask`（如果用户明确提供）
+- `out_dir`（本地保存目录；默认见下一节）
 - 其他可选字段
 
 ### 2. 缺字段就停下来问
 
 缺少必填字段时，不要调用脚本。
+
+### 2.1 输出目录定位
+
+先确定 `task_cwd`：用户打开 Codex / Claude Code 项目时的当前工作目录，也就是本次任务真正关联的项目目录。不要把 skill 安装目录、`$CODEX_HOME`、`~/.codex/generated_images/` 或脚本所在目录当成输出目录。
+
+默认保存目录：
+
+```text
+<task_cwd>/gen-images/
+```
+
+规则：
+- 如果用户明确指定保存目录，使用用户目录；相对路径按 `task_cwd` 解析。
+- 如果用户没有指定保存目录，传 `--out-dir "<task_cwd>/gen-images"`。
+- Bash 调用应在 `task_cwd` 下运行，或先 `cd "<task_cwd>"` 后再调用脚本。
+- `--out-dir` 只是本地保存参数，不要放进图片接口 payload，也不要写进 API 配置文件。
 
 ### 3. API 配置预检
 
@@ -193,13 +211,13 @@ allowed-tools: [Bash, Read]
 推荐预检命令形态：
 
 ```bash
-zsh -lc 'source ~/.zshrc >/dev/null 2>&1 || true; <python_cmd> "<skill-dir>/scripts/gen_images.py" --show-config'
+zsh -lc 'source ~/.zshrc >/dev/null 2>&1 || true; cd "<task-cwd>" && <python_cmd> "<skill-dir>/scripts/gen_images.py" --show-config'
 ```
 
 预检通过后，实际生成命令也要用同样的 shell 环境：
 
 ```bash
-zsh -lc 'source ~/.zshrc >/dev/null 2>&1 || true; <python_cmd> "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..."'
+zsh -lc 'source ~/.zshrc >/dev/null 2>&1 || true; cd "<task-cwd>" && <python_cmd> "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --out-dir "<task-cwd>/gen-images"'
 ```
 
 ### 4. 调用脚本
@@ -277,14 +295,14 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --ima
 示例：
 
 ```bash
-$python_cmd "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "1024x1024"
+$python_cmd "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "1024x1024" --out-dir "<task-cwd>/gen-images"
 ```
 
 对应工具调用要求：
 - `size=1024x1024` -> `timeout=600000`
 
 ```bash
-$python_cmd "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "3840x2160"
+$python_cmd "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." --size "3840x2160" --out-dir "<task-cwd>/gen-images"
 ```
 
 对应工具调用要求：
@@ -293,7 +311,7 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode generate --prompt "..." -
 改图同理：
 
 ```bash
-$python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..." --size "2160x3840"
+$python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --image "..." --size "2160x3840" --out-dir "<task-cwd>/gen-images"
 ```
 
 对应工具调用要求：
@@ -307,6 +325,7 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --ima
 - `--n`
 - `--moderation`
 - `--output-compression`
+- `--out-dir`
 - `--partial-images`
 - `--no-stream`（仅在用户明确要求非流式或 Responses 端点不可用排查时使用）
 - `--config`
@@ -333,7 +352,7 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --ima
 - 如果 Responses 端点不支持、返回兼容性错误，或改图请求使用 `mask`，回退旧的非流式 Images API
 - Images API 回退路径：Claude 文生图走 `/v1/images/generations`，改图走 `/v1/images/edits`
 - Images API 回退路径：Codex 文生图直接走 `/images/generations`，改图直接走 `/images/edits`
-- 将返回图片保存到当前工作目录下的 `./gen-images/`
+- 将返回图片保存到 `--out-dir` 指定目录；未传时保存到当前工作目录下的 `./gen-images/`
 - 输出 JSON 结果
 
 ## 结果处理
@@ -341,7 +360,7 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --ima
 脚本成功时会输出 JSON，例如：
 
 ```json
-{"ok": true, "paths": ["..."], "used_params": {"model": "gpt-image-2", "size": "1024x1024", "quality": "high", "output_format": "png", "n": 1, "stream": true}}
+{"ok": true, "paths": ["..."], "used_params": {"model": "gpt-image-2", "size": "1024x1024", "quality": "high", "output_format": "png", "n": 1, "stream": true, "out_dir": "..."}}
 ```
 
 脚本失败时会输出 JSON，例如：
@@ -355,7 +374,7 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --ima
 向用户输出：
 
 - `图片已生成, 图片路径: <路径>`
-- `实际使用的关键参数: model=..., size=..., quality=..., output_format=..., n=..., stream=...`
+- `实际使用的关键参数: model=..., size=..., quality=..., output_format=..., n=..., stream=..., out_dir=...`
 
 如果生成多张图片，列出所有路径。
 
@@ -370,5 +389,5 @@ $python_cmd "<skill-dir>/scripts/gen_images.py" --mode edit --prompt "..." --ima
 - 不要在缺少必填字段时猜测用户意图
 - 不要为可选字段做冗长说明
 - 改图时，本地路径、URL、data URL 都要支持
-- 除非用户明确要求，不要增加接口里没有的自定义字段
+- 除非用户明确要求，不要增加接口里没有的自定义字段；`--out-dir` 是本地保存参数，不是接口字段
 - 调用完成后，优先返回结果，不要输出多余解释

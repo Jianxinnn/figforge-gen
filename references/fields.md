@@ -42,6 +42,9 @@
 - `moderation`
 - `input_fidelity`（改图可用）
 
+本地保存字段：
+- `out_dir`：本地输出目录，只传给脚本的 `--out-dir`，不进入图片接口 payload；未指定时使用 `<task_cwd>/gen-images/`
+
 ## API 配置字段
 
 API 连接配置只包含：
@@ -65,6 +68,7 @@ API 连接配置只包含：
 - `source`、`base_url`、`model`、`token_present` 可以展示；完整 token 永远不要展示
 
 不要把 `size`、`quality`、`output_format` 写入 API 配置文件。这些生成参数由用户自然语言、当前 LLM 的保守推断和命令行参数控制。
+也不要把 `out_dir` 写入 API 配置文件；它只描述本次任务的本地保存位置。
 
 ## 自然语言映射
 
@@ -125,6 +129,13 @@ API 连接配置只包含：
 - 用户明确要求 `压缩`、`小体积`、`控制文件大小`，且 `output_format` 为 `jpg`、`jpeg` 或 `webp` 时，才传 `output_compression`
 - 如果用户没有给具体压缩率，不要猜具体数值，省略该字段
 
+### out_dir
+
+- 先确定 `task_cwd`：用户当前打开的项目/工作区目录，而不是 skill 安装目录、脚本目录或 `$CODEX_HOME`
+- 用户没有指定保存目录时，设置 `out_dir=<task_cwd>/gen-images`
+- 用户说 `保存到`、`输出到`、`放到` 某个目录时，设置为该目录；相对路径按 `task_cwd` 解析
+- `out_dir` 只作为 `scripts/gen_images.py --out-dir` 传递，不进入 API payload
+
 ### input_fidelity
 
 仅改图可用：
@@ -180,7 +191,7 @@ Bash 调用 `scripts/gen_images.py` 前，先根据 `size` 计算本次工具调
 
 成功后向用户报告：
 - `图片已生成, 图片路径: <路径>`
-- `实际使用的关键参数: model=..., size=..., quality=..., output_format=..., n=..., stream=...`
+- `实际使用的关键参数: model=..., size=..., quality=..., output_format=..., n=..., stream=..., out_dir=...`
 
 ## 失败输出格式
 
